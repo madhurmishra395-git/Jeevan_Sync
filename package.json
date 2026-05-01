@@ -1,0 +1,14 @@
+{
+  "name": "jeevan-sync-complete",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "install:all": "npm --prefix jeevan-sync-backend install && npm --prefix jeevan-sync-frontend install",
+    "build": "npm --prefix jeevan-sync-frontend run build",
+    "start": "npm --prefix jeevan-sync-backend start",
+    "dev": "concurrently \"npm --prefix jeevan-sync-backend run dev\" \"npm --prefix jeevan-sync-frontend run dev\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
