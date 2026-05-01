@@ -25,13 +25,13 @@ app.use(helmet({
       styleSrc: ["'self'", 'https://fonts.googleapis.com'],
       fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
       imgSrc: ["'self'", 'data:', 'blob:'],
-      connectSrc: ["'self'", process.env.CLIENT_URL || 'http://localhost:3000'],
+      connectSrc: ["'self'", process.env.CLIENT_URL || 'http://localhost:5173'],
     },
   },
 }));
 
 app.use(cors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: process.env.CLIENT_URL || 'http://localhost:5173',
   credentials: true,
 }));
 
