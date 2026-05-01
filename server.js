@@ -13,7 +13,7 @@ const rateLimit = require('express-rate-limit');
 const connectDB = require('./config/db');
 
 const app = express();
-const frontendDist = path.resolve(__dirname, '../jeevan-sync-frontend/dist');
+const frontendDist = path.resolve(__dirname, 'dist');
 
 connectDB();
 

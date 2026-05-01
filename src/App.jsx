@@ -1,9 +1,10 @@
 /**
  * JeevanSync – Complete React Frontend
  * Single-file app with Auth, Dashboard, Profile, Landing pages.
- * Uses localStorage for JWT and mock data for demo (connects to real backend when deployed).
+ * Uses localStorage for JWT and mock data for demo.
  *
- * To connect to real backend: set API_BASE to your Express server URL.
+ * API requests use same-origin /api by default. Set VITE_API_BASE only when
+ * the API is hosted on a separate domain.
  */
 
 import { useState, useEffect, useContext, createContext, useCallback } from "react";

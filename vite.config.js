@@ -1,7 +1,7 @@
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+const { defineConfig } = require('vite');
+const react = require('@vitejs/plugin-react');
 
-export default defineConfig({
+module.exports = defineConfig({
   plugins: [react()],
   build: {
     rolldownOptions: {
@@ -18,7 +18,7 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/api': { target: 'http://localhost:5000', changeOrigin: true }
-    }
-  }
+      '/api': { target: 'http://localhost:5000', changeOrigin: true },
+    },
+  },
 });
