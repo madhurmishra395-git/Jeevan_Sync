@@ -9,6 +9,8 @@
 
 import { useState, useEffect, useContext, createContext, useCallback } from "react";
 import { supabase } from "./supabase";
+import logoImg from "../public/logo.png";
+import healixImg from "../public/HeaLiX.png";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
@@ -225,17 +227,17 @@ function AuthPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-900 flex items-center justify-center p-4">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-sky-200/30 rounded-full blur-3xl" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-emerald-200/30 rounded-full blur-3xl" />
+        <div className="absolute -top-40 -right-40 w-96 h-96 bg-sky-500/10 rounded-full blur-3xl" />
+        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-emerald-500/10 rounded-full blur-3xl" />
       </div>
 
       <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <img src="/logo.png" alt="JeevanSync Logo" className="w-24 h-24 object-contain" />
+            <img src={logoImg} alt="JeevanSync Logo" className="w-24 h-24 object-contain" />
             <div>
-              <img src="/HeaLiX.png" alt="HeaLiX" className="h-16 object-contain" />
+              <img src={healixImg} alt="HeaLiX" className="h-16 object-contain" />
               <p className="text-xs text-slate-400 -mt-1">Your Health, Your Sync, Your Life</p>
             </div>
           </div>
@@ -335,8 +337,8 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }) {
     <aside className={`${collapsed ? "w-16" : "w-64"} bg-slate-900 border-r border-slate-800 flex flex-col h-screen sticky top-0 transition-all duration-300 shrink-0`}>
       {/* Logo */}
       <div className="p-4 flex items-center gap-3 border-b border-slate-800">
-        <img src="/logo.png" alt="Logo" className="w-14 h-14 object-contain shrink-0" />
-        {!collapsed && <img src="/HeaLiX.png" alt="HeaLiX" className="h-10 object-contain" />}
+        <img src={logoImg} alt="Logo" className="w-14 h-14 object-contain shrink-0" />
+        {!collapsed && <img src={healixImg} alt="HeaLiX" className="h-10 object-contain" />}
         <button onClick={() => setCollapsed(!collapsed)} className="ml-auto text-slate-400 hover:text-slate-300 transition">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
             <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
