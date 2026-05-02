@@ -235,11 +235,7 @@ function AuthPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <div className="w-12 h-12 bg-gradient-to-br from-sky-500 to-emerald-500 rounded-2xl flex items-center justify-center shadow-lg">
-              <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" className="w-7 h-7">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-              </svg>
-            </div>
+            <img src="/logo.png" alt="JeevanSync Logo" className="w-12 h-12 object-contain" />
             <div>
               <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-emerald-600 bg-clip-text text-transparent">JeevanSync</h1>
               <p className="text-xs text-slate-400 -mt-1">Your Health, Your Sync, Your Life</p>
@@ -341,11 +337,7 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }) {
     <aside className={`${collapsed ? "w-16" : "w-64"} bg-white border-r border-slate-100 flex flex-col h-screen sticky top-0 transition-all duration-300 shrink-0`}>
       {/* Logo */}
       <div className="p-4 flex items-center gap-3 border-b border-slate-100">
-        <div className="w-9 h-9 bg-gradient-to-br from-sky-500 to-emerald-500 rounded-xl flex items-center justify-center shrink-0">
-          <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" className="w-5 h-5">
-            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
-          </svg>
-        </div>
+        <img src="/logo.png" alt="Logo" className="w-9 h-9 object-contain shrink-0" />
         {!collapsed && <span className="font-bold text-slate-800">JeevanSync</span>}
         <button onClick={() => setCollapsed(!collapsed)} className="ml-auto text-slate-400 hover:text-slate-600 transition">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
