@@ -8,6 +8,7 @@
  */
 
 import { useState, useEffect, useContext, createContext, useCallback } from "react";
+import { supabase } from "./supabase";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
@@ -75,37 +76,38 @@ const api = async (path, opts = {}) => {
 
 // ── Auth Provider ─────────────────────────────────────────────────────────────
 function AuthProvider({ children }) {
+  const [session, setSession] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const stored = localStorage.getItem("js_user");
-    const token = localStorage.getItem("js_token");
-    if (stored && token) {
-      try { setUser(JSON.parse(stored)); } catch {}
-    }
-    setLoading(false);
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setUser(session?.user ? { id: session.user.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email.split("@")[0] } : null);
+      setLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+      setUser(session?.user ? { id: session.user.id, email: session.user.email, name: session.user.user_metadata?.full_name || session.user.email.split("@")[0] } : null);
+      setLoading(false);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const login = useCallback((userData, token) => {
-    localStorage.setItem("js_token", token);
-    localStorage.setItem("js_user", JSON.stringify(userData));
-    setUser(userData);
-  }, []);
+  const login = useCallback((userData, token) => {}, []); // kept to avoid breaking other calls
 
-  const logout = useCallback(() => {
-    localStorage.removeItem("js_token");
-    localStorage.removeItem("js_user");
-    setUser(null);
+  const logout = useCallback(async () => {
+    await supabase.auth.signOut();
   }, []);
 
   const updateUser = useCallback((userData) => {
-    localStorage.setItem("js_user", JSON.stringify(userData));
-    setUser(userData);
+    setUser((prev) => ({ ...prev, ...userData }));
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, updateUser, loading }}>
+    <AuthContext.Provider value={{ user, session, login, logout, updateUser, loading }}>
       {children}
     </AuthContext.Provider>
   );
@@ -137,7 +139,7 @@ const Icon = {
 
 // ── Utility Components ────────────────────────────────────────────────────────
 const Card = ({ children, className = "" }) => (
-  <div className={`bg-white rounded-2xl shadow-sm border border-slate-100 ${className}`}>
+  <div className={`bg-slate-900 rounded-2xl shadow-sm border border-slate-800 ${className}`}>
     {children}
   </div>
 );
@@ -149,7 +151,7 @@ const Badge = ({ children, color = "blue" }) => {
     yellow: "bg-amber-100 text-amber-700",
     red: "bg-red-100 text-red-700",
     purple: "bg-violet-100 text-violet-700",
-    gray: "bg-slate-100 text-slate-600",
+    gray: "bg-slate-800 text-slate-300",
   };
   return (
     <span className={`px-2.5 py-0.5 rounded-full text-xs font-medium ${colors[color]}`}>
@@ -160,7 +162,7 @@ const Badge = ({ children, color = "blue" }) => {
 
 const StatCard = ({ icon, label, value, unit, color, trend }) => {
   const colors = {
-    blue: "from-sky-50 to-sky-100 text-sky-600 border-sky-200",
+    blue: "from-slate-900 to-sky-100 text-sky-600 border-sky-200",
     green: "from-emerald-50 to-emerald-100 text-emerald-600 border-emerald-200",
     purple: "from-violet-50 to-violet-100 text-violet-600 border-violet-200",
     orange: "from-orange-50 to-orange-100 text-orange-600 border-orange-200",
@@ -169,10 +171,10 @@ const StatCard = ({ icon, label, value, unit, color, trend }) => {
   return (
     <Card className={`p-5 bg-gradient-to-br border ${colors[color]}`}>
       <div className="flex items-center justify-between mb-3">
-        <div className={`p-2 rounded-xl bg-white/70 ${colors[color].split(" ")[2]}`}>{icon}</div>
+        <div className={`p-2 rounded-xl bg-slate-900/70 ${colors[color].split(" ")[2]}`}>{icon}</div>
         {trend && <span className="text-xs text-emerald-600 font-medium">{trend}</span>}
       </div>
-      <p className="text-3xl font-bold text-slate-800">{value}<span className="text-sm font-normal text-slate-500 ml-1">{unit}</span></p>
+      <p className="text-3xl font-bold text-white">{value}<span className="text-sm font-normal text-slate-500 ml-1">{unit}</span></p>
       <p className="text-sm text-slate-500 mt-1">{label}</p>
     </Card>
   );
@@ -192,39 +194,35 @@ function AuthPage() {
     e.preventDefault();
     setError(""); setLoading(true);
     try {
-      // Try real backend first, fall back to demo mode
-      let data;
-      try {
-        data = await api(isLogin ? "/auth/login" : "/auth/register", {
-          method: "POST",
-          body: JSON.stringify(form),
+      if (!isLogin) {
+        const { data, error } = await supabase.auth.signUp({
+          email: form.email,
+          password: form.password,
+          options: { data: { full_name: form.name } }
         });
-      } catch {
-        // Demo mode: simulate success
-        data = {
-          success: true,
-          token: "demo_jwt_token_" + Date.now(),
-          user: { id: "demo", name: form.name || "Demo User", email: form.email, createdAt: new Date() },
-        };
-      }
-
-      if (data.success) {
-        login(data.user, data.token);
+        if (error) throw error;
+        if (data.user?.identities?.length === 0) {
+          setError("User already exists or email required.");
+        } else {
+          setError("Success! You can now sign in.");
+          setIsLogin(true);
+        }
       } else {
-        const errMsg = data.errors?.[0]?.msg || data.message || "Something went wrong";
-        setError(errMsg);
+        const { data, error } = await supabase.auth.signInWithPassword({
+          email: form.email,
+          password: form.password
+        });
+        if (error) throw error;
       }
-    } catch {
-      setError("Connection failed. Running in demo mode.");
-      // Demo login anyway
-      login({ id: "demo", name: form.name || "Demo User", email: form.email || "demo@jeevan.sync", createdAt: new Date() }, "demo_token");
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-sky-50 via-white to-emerald-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-slate-900 flex items-center justify-center p-4">
       {/* Background decoration */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-40 -right-40 w-96 h-96 bg-sky-200/30 rounded-full blur-3xl" />
@@ -235,9 +233,9 @@ function AuthPage() {
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center gap-2 mb-4">
-            <img src="/logo.png" alt="JeevanSync Logo" className="w-12 h-12 object-contain" />
+            <img src="/logo.png" alt="JeevanSync Logo" className="w-24 h-24 object-contain" />
             <div>
-              <h1 className="text-2xl font-bold bg-gradient-to-r from-sky-600 to-emerald-600 bg-clip-text text-transparent">JeevanSync</h1>
+              <img src="/HeaLiX.png" alt="HeaLiX" className="h-16 object-contain" />
               <p className="text-xs text-slate-400 -mt-1">Your Health, Your Sync, Your Life</p>
             </div>
           </div>
@@ -246,13 +244,13 @@ function AuthPage() {
         {/* Card */}
         <Card className="p-8">
           {/* Toggle */}
-          <div className="flex bg-slate-100 rounded-xl p-1 mb-8">
+          <div className="flex bg-slate-800 rounded-xl p-1 mb-8">
             {["Login", "Sign Up"].map((t, i) => (
               <button
                 key={t}
                 onClick={() => { setIsLogin(i === 0); setError(""); }}
                 className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${
-                  (i === 0) === isLogin ? "bg-white shadow-sm text-sky-600" : "text-slate-500 hover:text-slate-700"
+                  (i === 0) === isLogin ? "bg-slate-900 shadow-sm text-sky-600" : "text-slate-500 hover:text-slate-100"
                 }`}
               >
                 {t}
@@ -263,30 +261,30 @@ function AuthPage() {
           <form onSubmit={submit} className="space-y-4">
             {!isLogin && (
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1.5">Full Name</label>
+                <label className="block text-sm font-medium text-slate-100 mb-1.5">Full Name</label>
                 <input
                   name="name" type="text" value={form.name} onChange={handle}
                   placeholder="Aarav Sharma"
-                  className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
+                  className="w-full px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
                   required={!isLogin}
                 />
               </div>
             )}
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Email Address</label>
+              <label className="block text-sm font-medium text-slate-100 mb-1.5">Email Address</label>
               <input
                 name="email" type="email" value={form.email} onChange={handle}
                 placeholder="aarav@example.com"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
+                className="w-full px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
                 required
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1.5">Password</label>
+              <label className="block text-sm font-medium text-slate-100 mb-1.5">Password</label>
               <input
                 name="password" type="password" value={form.password} onChange={handle}
                 placeholder="••••••••"
-                className="w-full px-4 py-3 rounded-xl border border-slate-200 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
+                className="w-full px-4 py-3 rounded-xl border border-slate-700 focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none transition text-sm"
                 required minLength="6"
               />
             </div>
@@ -301,7 +299,7 @@ function AuthPage() {
               type="submit" disabled={loading}
               className="w-full py-3.5 bg-gradient-to-r from-sky-500 to-emerald-500 text-white rounded-xl font-semibold text-sm hover:from-sky-600 hover:to-emerald-600 transition-all shadow-md hover:shadow-lg disabled:opacity-70 mt-2"
             >
-              {loading ? "Please wait…" : isLogin ? "Sign In to JeevanSync" : "Create My Account"}
+              {loading ? "Please wait…" : isLogin ? "Sign In to HeaLiX" : "Create My Account"}
             </button>
           </form>
 
@@ -334,12 +332,12 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }) {
   const initials = user?.name?.split(" ").map(w => w[0]).slice(0, 2).join("").toUpperCase() || "??";
 
   return (
-    <aside className={`${collapsed ? "w-16" : "w-64"} bg-white border-r border-slate-100 flex flex-col h-screen sticky top-0 transition-all duration-300 shrink-0`}>
+    <aside className={`${collapsed ? "w-16" : "w-64"} bg-slate-900 border-r border-slate-800 flex flex-col h-screen sticky top-0 transition-all duration-300 shrink-0`}>
       {/* Logo */}
-      <div className="p-4 flex items-center gap-3 border-b border-slate-100">
-        <img src="/logo.png" alt="Logo" className="w-9 h-9 object-contain shrink-0" />
-        {!collapsed && <span className="font-bold text-slate-800">JeevanSync</span>}
-        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto text-slate-400 hover:text-slate-600 transition">
+      <div className="p-4 flex items-center gap-3 border-b border-slate-800">
+        <img src="/logo.png" alt="Logo" className="w-14 h-14 object-contain shrink-0" />
+        {!collapsed && <img src="/HeaLiX.png" alt="HeaLiX" className="h-10 object-contain" />}
+        <button onClick={() => setCollapsed(!collapsed)} className="ml-auto text-slate-400 hover:text-slate-300 transition">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
             <line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>
           </svg>
@@ -354,8 +352,8 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }) {
             onClick={() => setPage(item.id)}
             className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
               page === item.id
-                ? "bg-gradient-to-r from-sky-50 to-emerald-50 text-sky-600 border border-sky-100"
-                : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
+                ? "bg-gradient-to-r from-slate-900 to-slate-900 text-sky-600 border border-sky-100"
+                : "text-slate-500 hover:bg-slate-950 hover:text-slate-100"
             }`}
           >
             <span className="shrink-0">{item.icon}</span>
@@ -365,14 +363,14 @@ function Sidebar({ page, setPage, user, onLogout, collapsed, setCollapsed }) {
       </nav>
 
       {/* User */}
-      <div className="p-3 border-t border-slate-100">
+      <div className="p-3 border-t border-slate-800">
         <div className="flex items-center gap-3 px-2 py-2">
           <div className="w-8 h-8 bg-gradient-to-br from-sky-400 to-emerald-400 rounded-full flex items-center justify-center text-white text-xs font-bold shrink-0">
             {initials}
           </div>
           {!collapsed && (
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-slate-700 truncate">{user?.name}</p>
+              <p className="text-sm font-medium text-slate-100 truncate">{user?.name}</p>
               <p className="text-xs text-slate-400 truncate">{user?.email}</p>
             </div>
           )}
@@ -397,14 +395,14 @@ function DashboardPage({ user, setPage }) {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">
+          <h1 className="text-2xl font-bold text-white">
             Good morning, <span className="text-sky-600">{user?.name?.split(" ")[0]}</span> 👋
           </h1>
           <p className="text-slate-500 text-sm mt-1">
             {new Date().toLocaleDateString("en-IN", { weekday: "long", year: "numeric", month: "long", day: "numeric" })}
           </p>
         </div>
-        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-emerald-50 border border-emerald-100 rounded-xl">
+        <div className="hidden md:flex items-center gap-2 px-4 py-2 bg-slate-800 border border-emerald-100 rounded-xl">
           <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
           <span className="text-sm text-emerald-700 font-medium">Health Synced</span>
         </div>
@@ -412,7 +410,7 @@ function DashboardPage({ user, setPage }) {
 
       {/* Tip of the day */}
       <div className="flex items-start gap-4 p-4 bg-gradient-to-r from-sky-500 to-emerald-500 rounded-2xl text-white">
-        <div className="p-2 bg-white/20 rounded-xl"><Icon.Lightbulb /></div>
+        <div className="p-2 bg-slate-900/20 rounded-xl"><Icon.Lightbulb /></div>
         <div>
           <p className="text-xs font-semibold opacity-80 mb-1">TIP OF THE DAY</p>
           <p className="text-sm font-medium">{tip}</p>
@@ -431,7 +429,7 @@ function DashboardPage({ user, setPage }) {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {/* Steps chart */}
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Weekly Steps</h3>
+          <h3 className="font-semibold text-white mb-4">Weekly Steps</h3>
           <ResponsiveContainer width="100%" height={180}>
             <AreaChart data={[...MOCK_HEALTH_DATA].reverse()}>
               <defs>
@@ -451,7 +449,7 @@ function DashboardPage({ user, setPage }) {
 
         {/* Heart Rate chart */}
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Heart Rate Trend</h3>
+          <h3 className="font-semibold text-white mb-4">Heart Rate Trend</h3>
           <ResponsiveContainer width="100%" height={180}>
             <LineChart data={[...MOCK_HEALTH_DATA].reverse()}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -469,17 +467,17 @@ function DashboardPage({ user, setPage }) {
         {/* Upcoming reminders */}
         <Card className="p-5 lg:col-span-1">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-800">Today's Reminders</h3>
+            <h3 className="font-semibold text-white">Today's Reminders</h3>
             <button onClick={() => setPage("reminders")} className="text-xs text-sky-600 hover:underline">View all</button>
           </div>
           <div className="space-y-3">
             {MOCK_REMINDERS.filter(r => r.status === "active").map(r => (
-              <div key={r.id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-xl">
+              <div key={r.id} className="flex items-center gap-3 p-3 bg-slate-950 rounded-xl">
                 <div className="w-8 h-8 bg-sky-100 rounded-lg flex items-center justify-center text-sky-600 shrink-0">
                   <Icon.Bell />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-slate-700 truncate">{r.medicineName}</p>
+                  <p className="text-sm font-medium text-slate-100 truncate">{r.medicineName}</p>
                   <p className="text-xs text-slate-400">{r.times.join(", ")} · {r.dosage}</p>
                 </div>
               </div>
@@ -490,21 +488,21 @@ function DashboardPage({ user, setPage }) {
         {/* Upcoming appointments */}
         <Card className="p-5 lg:col-span-2">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold text-slate-800">Upcoming Appointments</h3>
+            <h3 className="font-semibold text-white">Upcoming Appointments</h3>
             <button onClick={() => setPage("telemedicine")} className="text-xs text-sky-600 hover:underline">Book new</button>
           </div>
           <div className="space-y-3">
             {MOCK_APPOINTMENTS.map(appt => (
-              <div key={appt.id} className="flex items-center gap-4 p-4 border border-slate-100 rounded-xl hover:border-sky-100 hover:bg-sky-50/30 transition">
+              <div key={appt.id} className="flex items-center gap-4 p-4 border border-slate-800 rounded-xl hover:border-sky-100 hover:bg-slate-800/30 transition">
                 <div className="w-10 h-10 bg-gradient-to-br from-sky-100 to-emerald-100 rounded-xl flex items-center justify-center text-sky-600 shrink-0">
                   {appt.type === "telemedicine" ? <Icon.Video /> : <Icon.Users />}
                 </div>
                 <div className="flex-1">
-                  <p className="text-sm font-semibold text-slate-800">{appt.doctorName}</p>
+                  <p className="text-sm font-semibold text-white">{appt.doctorName}</p>
                   <p className="text-xs text-slate-500">{appt.specialty}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-sm font-medium text-slate-700">{new Date(appt.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}</p>
+                  <p className="text-sm font-medium text-slate-100">{new Date(appt.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })}</p>
                   <p className="text-xs text-slate-400">{appt.time}</p>
                 </div>
                 <Badge color={appt.type === "telemedicine" ? "blue" : "green"}>
@@ -554,7 +552,7 @@ function HealthPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Health Tracking</h1>
+          <h1 className="text-2xl font-bold text-white">Health Tracking</h1>
           <p className="text-slate-500 text-sm">Log and visualize your daily metrics</p>
         </div>
         <button
@@ -566,14 +564,14 @@ function HealthPage() {
       </div>
 
       {saved && (
-        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+        <div className="flex items-center gap-2 p-3 bg-slate-800 border border-emerald-200 rounded-xl text-sm text-emerald-700">
           <Icon.CheckCircle /> Health data saved successfully!
         </div>
       )}
 
       {showForm && (
         <Card className="p-6">
-          <h3 className="font-semibold text-slate-800 mb-5">Log Today's Metrics</h3>
+          <h3 className="font-semibold text-white mb-5">Log Today's Metrics</h3>
           <form onSubmit={handleAdd} className="grid grid-cols-2 md:grid-cols-3 gap-4">
             {[
               { name: "heartRate", label: "Heart Rate (bpm)", placeholder: "72" },
@@ -583,17 +581,17 @@ function HealthPage() {
               { name: "water", label: "Water (ml)", placeholder: "2000" },
             ].map(f => (
               <div key={f.name}>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{f.label}</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{f.label}</label>
                 <input
                   type="number" name={f.name} placeholder={f.placeholder}
                   value={form[f.name]} onChange={e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none"
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 focus:ring-2 focus:ring-sky-100 outline-none"
                 />
               </div>
             ))}
             <div className="flex items-end gap-3 col-span-2 md:col-span-3">
-              <button type="submit" className="px-6 py-2.5 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Entry</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-200 transition">Cancel</button>
+              <button type="submit" className="px-6 py-2.5 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Entry</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium hover:bg-slate-700 transition">Cancel</button>
             </div>
           </form>
         </Card>
@@ -602,7 +600,7 @@ function HealthPage() {
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Sleep Quality</h3>
+          <h3 className="font-semibold text-white mb-4">Sleep Quality</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={[...entries].reverse().slice(-7)}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -615,7 +613,7 @@ function HealthPage() {
         </Card>
 
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Calorie Burn</h3>
+          <h3 className="font-semibold text-white mb-4">Calorie Burn</h3>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={[...entries].reverse()}>
               <defs>
@@ -634,7 +632,7 @@ function HealthPage() {
         </Card>
 
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Today's Distribution</h3>
+          <h3 className="font-semibold text-white mb-4">Today's Distribution</h3>
           <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={pieData} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={4} dataKey="value">
@@ -645,7 +643,7 @@ function HealthPage() {
           </ResponsiveContainer>
           <div className="flex flex-wrap gap-3 justify-center mt-2">
             {pieData.map((item, i) => (
-              <div key={item.name} className="flex items-center gap-1.5 text-xs text-slate-600">
+              <div key={item.name} className="flex items-center gap-1.5 text-xs text-slate-300">
                 <span className="w-3 h-3 rounded-full" style={{ background: COLORS[i] }} />
                 {item.name.replace(" ×100", "")}
               </div>
@@ -654,7 +652,7 @@ function HealthPage() {
         </Card>
 
         <Card className="p-5">
-          <h3 className="font-semibold text-slate-800 mb-4">Water Intake (ml)</h3>
+          <h3 className="font-semibold text-white mb-4">Water Intake (ml)</h3>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={[...entries].reverse().slice(-7)}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
@@ -692,7 +690,7 @@ function RemindersPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Medication Reminders</h1>
+          <h1 className="text-2xl font-bold text-white">Medication Reminders</h1>
           <p className="text-slate-500 text-sm">Never miss a dose</p>
         </div>
         <button
@@ -705,35 +703,35 @@ function RemindersPage() {
 
       {showForm && (
         <Card className="p-6">
-          <h3 className="font-semibold text-slate-800 mb-5">New Medication Reminder</h3>
+          <h3 className="font-semibold text-white mb-5">New Medication Reminder</h3>
           <form onSubmit={addReminder} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Medicine Name *</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Medicine Name *</label>
               <input required value={form.medicineName} onChange={e => setForm(p => ({ ...p, medicineName: e.target.value }))}
                 placeholder="e.g. Metformin 500mg"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Dosage *</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Dosage *</label>
               <input required value={form.dosage} onChange={e => setForm(p => ({ ...p, dosage: e.target.value }))}
                 placeholder="e.g. 1 tablet"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Times (comma-separated)</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Times (comma-separated)</label>
               <input value={form.times} onChange={e => setForm(p => ({ ...p, times: e.target.value }))}
                 placeholder="08:00, 14:00, 20:00"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Notes</label>
               <input value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                 placeholder="Take with food"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div className="flex items-center gap-3 col-span-full">
-              <button type="submit" className="px-6 py-2.5 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Add Reminder</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-medium hover:bg-slate-200 transition">Cancel</button>
+              <button type="submit" className="px-6 py-2.5 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Add Reminder</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium hover:bg-slate-700 transition">Cancel</button>
             </div>
           </form>
         </Card>
@@ -743,12 +741,12 @@ function RemindersPage() {
         {reminders.map(r => (
           <Card key={r.id} className="p-5">
             <div className="flex items-center gap-4">
-              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${r.status === "active" ? "bg-emerald-100 text-emerald-600" : "bg-slate-100 text-slate-400"}`}>
+              <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 ${r.status === "active" ? "bg-emerald-100 text-emerald-600" : "bg-slate-800 text-slate-400"}`}>
                 <Icon.Bell />
               </div>
               <div className="flex-1">
                 <div className="flex items-center gap-2 mb-1">
-                  <h3 className="font-semibold text-slate-800">{r.medicineName}</h3>
+                  <h3 className="font-semibold text-white">{r.medicineName}</h3>
                   <Badge color={statusColor[r.status]}>{r.status}</Badge>
                 </div>
                 <p className="text-sm text-slate-500">{r.dosage} · {r.times.join(", ")}</p>
@@ -770,7 +768,7 @@ function RemindersPage() {
         ))}
         {reminders.length === 0 && (
           <div className="text-center py-16 text-slate-400">
-            <div className="w-16 h-16 mx-auto mb-4 bg-slate-100 rounded-2xl flex items-center justify-center">
+            <div className="w-16 h-16 mx-auto mb-4 bg-slate-800 rounded-2xl flex items-center justify-center">
               <Icon.Bell />
             </div>
             <p className="font-medium">No reminders yet</p>
@@ -805,7 +803,7 @@ function PrescriptionsPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Prescriptions</h1>
+          <h1 className="text-2xl font-bold text-white">Prescriptions</h1>
           <p className="text-slate-500 text-sm">Your medical prescriptions securely stored</p>
         </div>
         <button
@@ -818,7 +816,7 @@ function PrescriptionsPage() {
 
       {showForm && (
         <Card className="p-6">
-          <h3 className="font-semibold text-slate-800 mb-5">New Prescription Entry</h3>
+          <h3 className="font-semibold text-white mb-5">New Prescription Entry</h3>
           <form onSubmit={addPrescription} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {[
               { name: "title", label: "Prescription Title *", placeholder: "e.g. Diabetes Management", required: true, span: false },
@@ -829,29 +827,29 @@ function PrescriptionsPage() {
               { name: "notes", label: "Notes", placeholder: "Take with water after meals", required: false, span: true },
             ].map(f => (
               <div key={f.name} className={f.span ? "col-span-full" : ""}>
-                <label className="block text-xs font-medium text-slate-600 mb-1">{f.label}</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">{f.label}</label>
                 <input
                   required={f.required} value={form[f.name]}
                   onChange={e => setForm(p => ({ ...p, [e.target.name]: e.target.value }))}
                   name={f.name} placeholder={f.placeholder}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none"
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none"
                 />
               </div>
             ))}
             <div className="flex items-center gap-3 col-span-full">
-              <button type="submit" className="px-6 py-2.5 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Prescription</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-medium">Cancel</button>
+              <button type="submit" className="px-6 py-2.5 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Prescription</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
             </div>
           </form>
         </Card>
       )}
 
       {/* Upload card */}
-      <div className="border-2 border-dashed border-sky-200 rounded-2xl p-8 text-center bg-sky-50/40 hover:bg-sky-50 transition cursor-pointer">
+      <div className="border-2 border-dashed border-sky-200 rounded-2xl p-8 text-center bg-slate-800/40 hover:bg-slate-800 transition cursor-pointer">
         <div className="w-14 h-14 mx-auto mb-3 bg-sky-100 rounded-2xl flex items-center justify-center text-sky-500">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-7 h-7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         </div>
-        <p className="font-semibold text-slate-700">Upload Prescription Image</p>
+        <p className="font-semibold text-slate-100">Upload Prescription Image</p>
         <p className="text-sm text-slate-400 mt-1">Drag & drop or click to upload JPG, PNG, PDF</p>
         <p className="text-xs text-sky-500 mt-2">Files are encrypted and stored securely</p>
       </div>
@@ -864,13 +862,13 @@ function PrescriptionsPage() {
                 <Icon.FileText />
               </div>
               <div className="flex-1">
-                <h3 className="font-semibold text-slate-800">{p.title}</h3>
+                <h3 className="font-semibold text-white">{p.title}</h3>
                 <p className="text-xs text-slate-400 mt-0.5">{p.doctor} · {new Date(p.date).toLocaleDateString("en-IN", { year: "numeric", month: "short", day: "numeric" })}</p>
                 {p.medicines?.length > 0 && (
                   <div className="mt-3 space-y-1.5">
                     {p.medicines.map((m, i) => (
-                      <div key={i} className="flex items-center gap-2 text-xs bg-slate-50 px-3 py-1.5 rounded-lg">
-                        <span className="font-medium text-slate-700">{m.name}</span>
+                      <div key={i} className="flex items-center gap-2 text-xs bg-slate-950 px-3 py-1.5 rounded-lg">
+                        <span className="font-medium text-slate-100">{m.name}</span>
                         <span className="text-slate-400">·</span>
                         <span className="text-slate-500">{m.dosage}</span>
                         {m.duration && <><span className="text-slate-400">·</span><span className="text-slate-400">{m.duration}</span></>}
@@ -917,7 +915,7 @@ function TelemedicinePage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-800">Telemedicine</h1>
+          <h1 className="text-2xl font-bold text-white">Telemedicine</h1>
           <p className="text-slate-500 text-sm">Consult doctors from the comfort of your home</p>
         </div>
         <button onClick={() => setShowForm(!showForm)}
@@ -927,55 +925,55 @@ function TelemedicinePage() {
       </div>
 
       {booked && (
-        <div className="flex items-center gap-2 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-700">
+        <div className="flex items-center gap-2 p-4 bg-slate-800 border border-emerald-200 rounded-xl text-emerald-700">
           <Icon.CheckCircle /> <span className="font-medium">Appointment booked!</span> You'll receive a confirmation shortly.
         </div>
       )}
 
       {showForm && (
         <Card className="p-6">
-          <h3 className="font-semibold text-slate-800 mb-5">Book an Appointment</h3>
+          <h3 className="font-semibold text-white mb-5">Book an Appointment</h3>
           <form onSubmit={book} className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Doctor Name *</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Doctor Name *</label>
               <input required value={form.doctorName} onChange={e => setForm(p => ({ ...p, doctorName: e.target.value }))}
                 placeholder="Dr. Priya Sharma"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Specialty</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Specialty</label>
               <input value={form.specialty} onChange={e => setForm(p => ({ ...p, specialty: e.target.value }))}
                 placeholder="Cardiology"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Date *</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Date *</label>
               <input required type="date" value={form.date} onChange={e => setForm(p => ({ ...p, date: e.target.value }))}
                 min={new Date().toISOString().split("T")[0]}
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Time *</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Time *</label>
               <input required type="time" value={form.time} onChange={e => setForm(p => ({ ...p, time: e.target.value }))}
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Type</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Type</label>
               <select value={form.type} onChange={e => setForm(p => ({ ...p, type: e.target.value }))}
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none bg-white">
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none bg-slate-900">
                 <option value="telemedicine">Video Consultation</option>
                 <option value="in-person">In-Person</option>
               </select>
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Notes</label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Notes</label>
               <input value={form.notes} onChange={e => setForm(p => ({ ...p, notes: e.target.value }))}
                 placeholder="Reason for visit"
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
             </div>
             <div className="flex gap-3 col-span-full">
-              <button type="submit" className="px-6 py-2.5 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Confirm Booking</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-medium">Cancel</button>
+              <button type="submit" className="px-6 py-2.5 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Confirm Booking</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
             </div>
           </form>
         </Card>
@@ -983,7 +981,7 @@ function TelemedicinePage() {
 
       {/* Featured Doctors */}
       <div>
-        <h2 className="font-semibold text-slate-800 mb-4">Available Doctors</h2>
+        <h2 className="font-semibold text-white mb-4">Available Doctors</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {DOCTORS.map(doc => (
             <Card key={doc.name} className="p-5">
@@ -993,19 +991,19 @@ function TelemedicinePage() {
                 </div>
                 <div className="flex-1">
                   <div className="flex items-center gap-2">
-                    <h3 className="font-semibold text-slate-800 text-sm">{doc.name}</h3>
+                    <h3 className="font-semibold text-white text-sm">{doc.name}</h3>
                     {doc.available ? <span className="w-2 h-2 bg-emerald-400 rounded-full" /> : <span className="w-2 h-2 bg-slate-300 rounded-full" />}
                   </div>
                   <p className="text-xs text-slate-500">{doc.specialty} · {doc.exp}</p>
                   <div className="flex items-center gap-1 mt-1">
                     <span className="text-amber-400 text-xs">★</span>
-                    <span className="text-xs font-medium text-slate-600">{doc.rating}</span>
+                    <span className="text-xs font-medium text-slate-300">{doc.rating}</span>
                   </div>
                 </div>
                 <button
                   disabled={!doc.available}
                   onClick={() => { setForm(f => ({ ...f, doctorName: doc.name, specialty: doc.specialty })); setShowForm(true); }}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${doc.available ? "bg-sky-500 text-white hover:bg-sky-600" : "bg-slate-100 text-slate-400 cursor-not-allowed"}`}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-medium transition ${doc.available ? "bg-slate-8000 text-white hover:bg-sky-600" : "bg-slate-800 text-slate-400 cursor-not-allowed"}`}
                 >
                   {doc.available ? "Book" : "Busy"}
                 </button>
@@ -1017,7 +1015,7 @@ function TelemedicinePage() {
 
       {/* Appointments */}
       <div>
-        <h2 className="font-semibold text-slate-800 mb-4">My Appointments</h2>
+        <h2 className="font-semibold text-white mb-4">My Appointments</h2>
         <div className="space-y-3">
           {appointments.map(appt => (
             <Card key={appt.id} className="p-4">
@@ -1026,7 +1024,7 @@ function TelemedicinePage() {
                   {appt.type === "telemedicine" ? <Icon.Video /> : <Icon.Users />}
                 </div>
                 <div className="flex-1">
-                  <p className="font-medium text-slate-800 text-sm">{appt.doctorName}</p>
+                  <p className="font-medium text-white text-sm">{appt.doctorName}</p>
                   <p className="text-xs text-slate-400">{appt.specialty || "General"} · {new Date(appt.date).toLocaleDateString("en-IN", { month: "short", day: "numeric" })} at {appt.time}</p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1034,7 +1032,7 @@ function TelemedicinePage() {
                   <Badge color={appt.status === "scheduled" ? "green" : "gray"}>{appt.status}</Badge>
                 </div>
                 {appt.type === "telemedicine" && appt.status === "scheduled" && (
-                  <button className="px-3 py-1.5 bg-emerald-500 text-white rounded-xl text-xs font-medium hover:bg-emerald-600 transition">
+                  <button className="px-3 py-1.5 bg-slate-8000 text-white rounded-xl text-xs font-medium hover:bg-emerald-600 transition">
                     Join Now
                   </button>
                 )}
@@ -1059,7 +1057,7 @@ function CommunityPage() {
   return (
     <div className="p-6 space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">Community Support</h1>
+        <h1 className="text-2xl font-bold text-white">Community Support</h1>
         <p className="text-slate-500 text-sm">Connect with others on their health journey</p>
       </div>
 
@@ -1076,14 +1074,14 @@ function CommunityPage() {
       {/* Post composer */}
       <Card className="p-5">
         <textarea rows={3} placeholder="Share a health tip, milestone, or question with the community…"
-          className="w-full text-sm text-slate-700 placeholder-slate-400 resize-none outline-none border-none" />
-        <div className="flex items-center justify-between pt-3 border-t border-slate-100">
+          className="w-full text-sm text-slate-100 placeholder-slate-400 resize-none outline-none border-none" />
+        <div className="flex items-center justify-between pt-3 border-t border-slate-800">
           <div className="flex gap-2">
             {["Fitness", "Nutrition", "Mental Health", "Chronic Care"].map(tag => (
-              <button key={tag} className="px-2.5 py-1 bg-slate-100 text-slate-500 rounded-lg text-xs hover:bg-sky-100 hover:text-sky-600 transition">#{tag}</button>
+              <button key={tag} className="px-2.5 py-1 bg-slate-800 text-slate-500 rounded-lg text-xs hover:bg-sky-100 hover:text-sky-600 transition">#{tag}</button>
             ))}
           </div>
-          <button className="px-4 py-2 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Post</button>
+          <button className="px-4 py-2 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Post</button>
         </div>
       </Card>
 
@@ -1094,12 +1092,12 @@ function CommunityPage() {
               <div className="w-9 h-9 bg-gradient-to-br from-sky-400 to-emerald-400 rounded-full flex items-center justify-center text-white text-sm font-bold shrink-0">{post.avatar}</div>
               <div className="flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-slate-800">{post.author}</span>
+                  <span className="text-sm font-semibold text-white">{post.author}</span>
                   <span className="text-xs text-slate-400">{post.time}</span>
                   <Badge color={tagColors[post.tag] || "gray"}>#{post.tag}</Badge>
                 </div>
-                <p className="text-sm text-slate-600 mt-2 leading-relaxed">{post.content}</p>
-                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-100">
+                <p className="text-sm text-slate-300 mt-2 leading-relaxed">{post.content}</p>
+                <div className="flex items-center gap-4 mt-3 pt-3 border-t border-slate-800">
                   <button className="flex items-center gap-1 text-xs text-slate-400 hover:text-red-500 transition">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
                     {post.likes}
@@ -1141,10 +1139,10 @@ function ProfilePage({ user, onLogout }) {
 
   return (
     <div className="p-6 max-w-2xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-slate-800">My Profile</h1>
+      <h1 className="text-2xl font-bold text-white">My Profile</h1>
 
       {saved && (
-        <div className="flex items-center gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-700">
+        <div className="flex items-center gap-2 p-3 bg-slate-800 border border-emerald-200 rounded-xl text-sm text-emerald-700">
           <Icon.CheckCircle /> Profile updated successfully!
         </div>
       )}
@@ -1156,7 +1154,7 @@ function ProfilePage({ user, onLogout }) {
             {initials}
           </div>
           <div>
-            <h2 className="text-xl font-bold text-slate-800">{user?.name}</h2>
+            <h2 className="text-xl font-bold text-white">{user?.name}</h2>
             <p className="text-slate-500 text-sm">{user?.email}</p>
             <p className="text-xs text-slate-400 mt-1">Member since {new Date(user?.createdAt || Date.now()).toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
           </div>
@@ -1166,7 +1164,7 @@ function ProfilePage({ user, onLogout }) {
       {/* Account info */}
       <Card className="p-6">
         <div className="flex items-center justify-between mb-5">
-          <h3 className="font-semibold text-slate-800">Account Information</h3>
+          <h3 className="font-semibold text-white">Account Information</h3>
           {!editing && (
             <button onClick={() => setEditing(true)} className="text-sm text-sky-600 hover:underline font-medium">Edit Profile</button>
           )}
@@ -1176,25 +1174,25 @@ function ProfilePage({ user, onLogout }) {
           <form onSubmit={save} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Full Name</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Full Name</label>
                 <input value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Phone</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Phone</label>
                 <input value={form.phone} onChange={e => setForm(p => ({ ...p, phone: e.target.value }))}
                   placeholder="+91 98765 43210"
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Date of Birth</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Date of Birth</label>
                 <input type="date" value={form.dateOfBirth} onChange={e => setForm(p => ({ ...p, dateOfBirth: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none" />
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-slate-600 mb-1">Blood Group</label>
+                <label className="block text-xs font-medium text-slate-300 mb-1">Blood Group</label>
                 <select value={form.bloodGroup} onChange={e => setForm(p => ({ ...p, bloodGroup: e.target.value }))}
-                  className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl focus:border-sky-400 outline-none bg-white">
+                  className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl focus:border-sky-400 outline-none bg-slate-900">
                   <option value="">Select</option>
                   {["A+","A-","B+","B-","AB+","AB-","O+","O-"].map(bg => <option key={bg}>{bg}</option>)}
                 </select>
@@ -1202,13 +1200,13 @@ function ProfilePage({ user, onLogout }) {
             </div>
             {/* Email – read-only, acts as unique identity */}
             <div>
-              <label className="block text-xs font-medium text-slate-600 mb-1">Email Address <span className="text-slate-400">(cannot be changed – your unique identity)</span></label>
+              <label className="block text-xs font-medium text-slate-300 mb-1">Email Address <span className="text-slate-400">(cannot be changed – your unique identity)</span></label>
               <input value={user?.email} disabled
-                className="w-full px-3 py-2.5 text-sm border border-slate-200 rounded-xl bg-slate-50 text-slate-400 cursor-not-allowed" />
+                className="w-full px-3 py-2.5 text-sm border border-slate-700 rounded-xl bg-slate-950 text-slate-400 cursor-not-allowed" />
             </div>
             <div className="flex gap-3">
-              <button type="submit" className="px-6 py-2.5 bg-sky-500 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Changes</button>
-              <button type="button" onClick={() => setEditing(false)} className="px-6 py-2.5 bg-slate-100 text-slate-600 rounded-xl text-sm font-medium">Cancel</button>
+              <button type="submit" className="px-6 py-2.5 bg-slate-8000 text-white rounded-xl text-sm font-medium hover:bg-sky-600 transition">Save Changes</button>
+              <button type="button" onClick={() => setEditing(false)} className="px-6 py-2.5 bg-slate-800 text-slate-300 rounded-xl text-sm font-medium">Cancel</button>
             </div>
           </form>
         ) : (
@@ -1220,10 +1218,10 @@ function ProfilePage({ user, onLogout }) {
               ["Blood Group", "Not set"],
               ["Member Since", new Date(user?.createdAt || Date.now()).toLocaleDateString("en-IN")],
             ].map(([label, value, locked]) => (
-              <div key={label} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
+              <div key={label} className="flex items-center justify-between py-3 border-b border-slate-800 last:border-0">
                 <span className="text-sm text-slate-500">{label}</span>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-slate-800">{value}</span>
+                  <span className="text-sm font-medium text-white">{value}</span>
                   {locked && <Badge color="gray">Identity</Badge>}
                 </div>
               </div>
@@ -1234,16 +1232,16 @@ function ProfilePage({ user, onLogout }) {
 
       {/* Security */}
       <Card className="p-6">
-        <h3 className="font-semibold text-slate-800 mb-4">Security & Privacy</h3>
+        <h3 className="font-semibold text-white mb-4">Security & Privacy</h3>
         <div className="space-y-3">
           {[
             ["Password", "Last changed – never", "Change"],
             ["Two-Factor Auth", "Not enabled", "Enable"],
             ["Data Export", "Download all your health data", "Export"],
           ].map(([label, desc, action]) => (
-            <div key={label} className="flex items-center justify-between py-3 border-b border-slate-100 last:border-0">
+            <div key={label} className="flex items-center justify-between py-3 border-b border-slate-800 last:border-0">
               <div>
-                <p className="text-sm font-medium text-slate-700">{label}</p>
+                <p className="text-sm font-medium text-slate-100">{label}</p>
                 <p className="text-xs text-slate-400">{desc}</p>
               </div>
               <button className="text-xs text-sky-600 font-medium hover:underline">{action}</button>
@@ -1257,7 +1255,7 @@ function ProfilePage({ user, onLogout }) {
         onClick={onLogout}
         className="w-full flex items-center justify-center gap-2 py-3.5 border-2 border-red-200 text-red-500 rounded-xl font-medium text-sm hover:bg-red-50 transition"
       >
-        <Icon.LogOut /> Sign Out of JeevanSync
+        <Icon.LogOut /> Sign Out of HeaLiX
       </button>
     </div>
   );
@@ -1280,7 +1278,7 @@ function AppShell() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 font-sans">
+    <div className="flex min-h-screen bg-slate-950 font-sans">
       <Sidebar page={page} setPage={setPage} user={user} onLogout={logout} collapsed={collapsed} setCollapsed={setCollapsed} />
       <main className="flex-1 overflow-y-auto">
         {pages[page]}
@@ -1295,14 +1293,14 @@ function Root() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-sky-50 to-emerald-50 flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 mx-auto mb-4 bg-gradient-to-br from-sky-500 to-emerald-500 rounded-2xl flex items-center justify-center animate-pulse">
             <svg viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" className="w-7 h-7">
               <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
             </svg>
           </div>
-          <p className="text-slate-500 text-sm">Loading JeevanSync…</p>
+          <p className="text-slate-500 text-sm">Loading HeaLiX…</p>
         </div>
       </div>
     );

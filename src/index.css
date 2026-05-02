@@ -7,9 +7,16 @@
   html { scroll-behavior: smooth; }
   body {
     margin: 0;
-    background: #f8fafc;
-    color: #1e293b;
+    background: #020617;
+    color: #f8fafc;
     -webkit-font-smoothing: antialiased;
+  }
+  input, textarea, select {
+    background-color: #1e293b;
+    color: #f8fafc;
+  }
+  input::placeholder, textarea::placeholder {
+    color: #94a3b8;
   }
 }
 
